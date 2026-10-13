@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.json">
+<title>忘れ物ゼロ通知</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f4f7fb;color:#172033}
+header{background:#2563eb;color:white;padding:24px 18px 20px}header h1{margin:0 0 5px;font-size:25px}header p{margin:0;opacity:.9}
+main{max-width:900px;margin:auto;padding:16px}.card{background:white;border-radius:18px;padding:18px;margin-bottom:16px;box-shadow:0 4px 16px #0000000b}
+h2{font-size:19px;margin:0 0 14px}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+label{font-weight:700;font-size:13px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;padding:11px;border:1px solid #d7deea;border-radius:10px;margin-top:6px;background:#fff}
+textarea{min-height:75px}.period{padding:10px;background:#f8fafc;border-radius:12px}.period b{display:block;margin-bottom:5px}
+button{border:0;border-radius:11px;padding:11px 15px;background:#2563eb;color:white;font-weight:700;cursor:pointer;margin:4px 3px 0 0}
+button.secondary{background:#e8eef8;color:#1d3557}button.danger{background:#dc3545}
+.notice{padding:13px;border-left:5px solid #2563eb;background:#eff6ff;border-radius:10px;margin:9px 0}
+.small{font-size:13px;color:#617089}.status{padding:12px;border-radius:10px;background:#f1f5f9;margin-top:10px}
+.item{display:flex;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid #edf0f5}.item:last-child{border:0}
+.item span{flex:1}.tag{font-size:12px;padding:4px 8px;border-radius:999px;background:#e0ecff;color:#1d4ed8}
+@media(max-width:650px){.grid{grid-template-columns:1fr 1fr}.period:nth-child(1){grid-column:span 2}header h1{font-size:22px}}
+</style>
+</head>
+<body>
+<header><h1>🎒 忘れ物ゼロ通知</h1><p>時間割から「明日の持ち物」を自動でお知らせ</p></header>
+<main>
+<section class="card">
+<h2>🔔 通知設定</h2>
+<label>前日通知時刻<input id="notifyTime" type="time" value="18:00"></label>
+<label style="display:block;margin-top:10px"><input id="morningOn" type="checkbox" checked style="width:auto"> 当日の朝にも通知する</label>
+<button onclick="enableNotifications()">ブラウザ通知を有効にする</button>
+<button class="secondary" onclick="testNotification()">テスト通知</button>
+<div id="permission" class="status">通知状態を確認中…</div>
+</section>
+
+<section class="card">
+<h2>📅 時間割</h2>
+<p class="small">各曜日の授業名を入力してください。「体育」「体力テスト」などを入れると、登録した持ち物を自動通知します。</p>
+<div class="grid" id="timetable"></div>
+<button onclick="saveTimetable()">時間割を保存</button>
+<button class="secondary" onclick="loadExample()">サンプルを入れる</button>
+</section>
+
+<section class="card">
+<h2>🎒 授業ごとの持ち物</h2>
+<div id="items"></div>
+<h3>新しい授業を追加</h3>
+<label>授業名<input id="newSubject" placeholder="例：体育"></label>
+<label>持ち物<input id="newItems" placeholder="例：体操服、体育館シューズ"></label>
+<button onclick="addSubject()">追加</button>
+</section>
+
+<section class="card">
+<h2>📣 今日・明日の通知</h2>
+<div id="preview"></div>
+</section>
+
+<section class="card">
+<h2>🏫 Teams・ロイロノートについて</h2>
+<p class="small">この版はスマホ/PCのブラウザ通知を使う基本版です。学校のTeamsやロイロノートへ自動投稿する場合は、学校側で許可された連携API・Webhook等を別途設定する必要があります。</p>
+<label>学校向け通知文テンプレート<textarea id="template">📚 明日は{subject}です！\n{items}を忘れないようにしましょう。</textarea></label>
+<button onclick="saveTemplate()">テンプレート保存</button>
+</section>
+</main>
+<script>
+const days=["月","火","水","木","金"], periods=6;
+const defaultRules={
+ "体育":["体操服","体育館シューズ"],
+ "体力テスト":["体操服","体育館シューズ"],
+ "美術":["美術道具"],
+ "音楽":["音楽用品"],
+ "家庭科":["家庭科の道具"],
+ "理科":["理科の教科書","ノート"]
+};
+let data=JSON.parse(localStorage.getItem("wasureno")||"null")||{timetable:{},rules:defaultRules,notifyTime:"18:00",morningOn:true,template:"📚 明日は{subject}です！\\n{items}を忘れないようにしましょう。"};
+function init(){
+ document.getElementById("notifyTime").value=data.notifyTime;
+ document.getElementById("morningOn").checked=data.morningOn;
+ document.getElementById("template").value=data.template;
+ renderTimetable();renderItems();renderPreview();checkPermission();
+}
+function renderTimetable(){
+ const box=document.getElementById("timetable");box.innerHTML="";
+ days.forEach(d=>{for(let p=1;p<=periods;p++){
+ let key=d+p,val=(data.timetable[key]||"");
+ box.innerHTML+=`<div class="period"><b>${d}曜 ${p}限</b><input id="tt_${key}" value="${esc(val)}" placeholder="授業名"></div>`;
+ }});
+}
+function saveTimetable(){
+ days.forEach(d=>{for(let p=1;p<=periods;p++)data.timetable[d+p]=document.getElementById("tt_"+d+p).value.trim();});
+ data.notifyTime=document.getElementById("notifyTime").value;
+ data.morningOn=document.getElementById("morningOn").checked;
+ persist();renderPreview();alert("時間割を保存しました！");
+}
+function renderItems(){
+ const box=document.getElementById("items");box.innerHTML="";
+ Object.entries(data.rules).forEach(([s,arr])=>{
+  const row=document.createElement("div");row.className="item";
+  row.innerHTML=`<span><b>${esc(s)}</b><br><span class="small">${esc(arr.join("、"))}</span></span><span class="tag">${arr.length}個</span><button class="danger" onclick="removeSubject('${js(s)}')">削除</button>`;
+  box.appendChild(row);
+ });
+}
+function addSubject(){
+ const s=document.getElementById("newSubject").value.trim(), raw=document.getElementById("newItems").value.trim();
+ if(!s||!raw)return alert("授業名と持ち物を入力してください。");
+ data.rules[s]=raw.split(/[、,，]/).map(x=>x.trim()).filter(Boolean);persist();
+ document.getElementById("newSubject").value="";document.getElementById("newItems").value="";
+ renderItems();renderPreview();
+}
+function removeSubject(s){delete data.rules[s];persist();renderItems();renderPreview();}
+function persist(){localStorage.setItem("wasureno",JSON.stringify(data));}
+function subjectItems(s){
+ for(const [name,items] of Object.entries(data.rules)){if(s.includes(name)||name.includes(s))return items;}
+ return [];
+}
+function nextSchoolDay(){
+ const now=new Date(), n=(now.getDay()+6)%7; // 月=0
+ let target=n+1;if(target>4)return null;
+ const date=new Date(now);date.setDate(now.getDate()+1);return {date,index:target};
+}
+function renderPreview(){
+ const box=document.getElementById("preview"), n=nextSchoolDay();
+ if(!n){box.innerHTML='<div class="notice">次の平日の授業を表示できるのは月〜金です。</div>';return;}
+ const d=days[n.index], lessons=[];
+ for(let p=1;p<=periods;p++){let s=data.timetable[d+p];if(s)lessons.push({p,s,items:subjectItems(s)});}
+ if(!lessons.length){box.innerHTML=`<div class="notice">明日（${d}曜日）の授業がまだ登録されていません。</div>`;return;}
+ box.innerHTML=lessons.map(x=>`<div class="notice"><b>${d}曜${x.p}限：${esc(x.s)}</b><br>${x.items.length?"🎒 "+esc(x.items.join("、")):"持ち物登録なし"}</div>`).join("");
+}
+async function enableNotifications(){
+ if(!("Notification"in window))return alert("このブラウザは通知に対応していません。");
+ const p=await Notification.requestPermission();checkPermission();
+ if(p==="granted")alert("通知を有効にしました。");
+}
+function checkPermission(){
+ const el=document.getElementById("permission");
+ el.textContent="通知状態："+(("Notification"in window)?Notification.permission:"このブラウザは非対応");
+}
+function testNotification(){
+ if(!("Notification"in window)||Notification.permission!=="granted")return alert("先に「ブラウザ通知を有効にする」を押してください。");
+ new Notification("🎒 忘れ物ゼロ通知",{body:"テスト通知です。明日の持ち物を確認しましょう！"});
+}
+function saveTemplate(){data.template=document.getElementById("template").value;persist();alert("テンプレートを保存しました。");}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function js(s){return String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");}
+function loadExample(){
+ days.forEach((d,i)=>{for(let p=1;p<=periods;p++)data.timetable[d+p]="";});
+ Object.assign(data.timetable,{"月3":"体育","火2":"数学","水4":"美術","木6":"体育","金1":"体育"});
+ persist();renderTimetable();renderPreview();
+}
+init();
+setInterval(()=>{data.notifyTime=document.getElementById("notifyTime").value;data.morningOn=document.getElementById("morningOn").checked;persist();},60000);
+</script>
+</body>
+</html>
